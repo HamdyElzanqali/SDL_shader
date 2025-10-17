@@ -1,3 +1,12 @@
 [submodule "external/shaderc"]
 	path = external/shaderc
 	url = https://github.com/google/shaderc
+[submodule "external/glslang"]
+	path = external/glslang
+	url = https://github.com/KhronosGroup/glslang
+[submodule "external/SDL"]
+	path = external/SDL
+	url = https://github.com/libsdl-org/SDL
+[submodule "external/SDL_shadercross"]
+	path = external/SDL_shadercross
+	url = https://github.com/libsdl-org/SDL_shadercross
