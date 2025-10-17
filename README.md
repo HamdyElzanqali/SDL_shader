@@ -15,8 +15,8 @@ use `-h` for all available options.
 for integrating with cmake in existing projects you can simply do the following:
 
 ```cmake
-add_subdirectory(path/to/SDL_shader)
 set(SDL_SHADER_CLI OFF CACHE BOOL "" FORCE)
+add_subdirectory(path/to/SDL_shader)
 target_link_libraries(app PRIVATE SDL_shader)
 ```
 
