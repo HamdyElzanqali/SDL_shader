@@ -1,0 +1,16 @@
+[submodule "ext/SDLr"]
+    path = ext/SDL
+    url = https://github.com/libsdl-org/SDL
+
+[submodule "ext/SDL_shadercross"]
+    path = ext/SDL_shadercross
+    url = https://github.com/libsdl-org/SDL_shadercross
+
+[submodule "ext/shaderc"]
+    path = ext/shaderc
+    url = https://github.com/google/shaderc
+
+[submodule "ext/glslang"]
+    path = ext/glslang
+    url = https://github.com/KhronosGroup/glslang
+
