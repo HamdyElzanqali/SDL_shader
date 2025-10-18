@@ -1,14 +1,15 @@
-name: Build SDL_shader (Linux + Windows)
+name: CMake on multiple platforms (SDL_shader)
 
 on:
   push:
     branches: [ "main" ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ "main" ]
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -18,60 +19,116 @@ jobs:
         build_type: [Release]
 
     steps:
-      # 1️⃣ Checkout with submodules
+      # --- Checkout with submodules ---
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # 2️⃣ Set build directory variable
-      - name: Set up CMake build directory
-        id: vars
-        run: echo "build_dir=${{ github.workspace }}/build" >> $GITHUB_OUTPUT
+      # --- Install dependencies (Linux only) ---
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            ninja-build \
+            libwayland-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxrender-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libdrm-dev \
+            libgbm-dev \
+            libegl1-mesa-dev \
+            libgles2-mesa-dev \
+            libvulkan-dev \
+            wayland-protocols \
+            pkg-config
 
-      # 3️⃣ Configure project
+      # --- Force MSVC environment on Windows ---
+      - name: Set up MSVC environment
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # --- Adjust compiler flags for GCC ---
+      - name: Adjust GCC flags
+        if: matrix.os == 'ubuntu-latest'
+        run: echo "CXXFLAGS=-Wno-reorder -Wno-attributes" >> $GITHUB_ENV
+
+      # --- Configure CMake ---
       - name: Configure CMake
-        shell: bash
-        env:
-          CXXFLAGS: -Wno-reorder -Wno-attributes
         run: |
-          cmake -S . -B ${{ steps.vars.outputs.build_dir }} \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DSDL_SHADER_CLI=ON \
+            -DSDL_SHADER_LIBRARY=ON
 
-      # 4️⃣ Build project
+      # --- Build ---
       - name: Build
-        shell: bash
-        run: |
-          cmake --build ${{ steps.vars.outputs.build_dir }} --config ${{ matrix.build_type }}
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
 
-      # 5️⃣ Package static library + headers
-      - name: Package library and includes
+      # --- Package CLI ---
+      - name: Package CLI
         shell: bash
         run: |
-          mkdir -p package/include
-          mkdir -p package/lib
-          cp -r include/* package/include/ || true
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp ${{ steps.vars.outputs.build_dir }}/Release/*.lib package/lib/ || true
+          mkdir -p cli_artifacts
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp build/${{ matrix.build_type }}/sdlshader.exe cli_artifacts/ || cp build/sdlshader.exe cli_artifacts/
+            7z a sdlshader-${{ matrix.os }}.zip cli_artifacts
           else
-            cp ${{ steps.vars.outputs.build_dir }}/libSDL_shader*.a package/lib/ || true
+            cp build/sdlshader cli_artifacts/
+            tar -czf sdlshader-${{ matrix.os }}.tar.gz cli_artifacts
           fi
-          cd package
-          zip -r ../libSDL_shader-${{ matrix.os }}.zip include lib
-          cd ..
 
-      # 6️⃣ Upload CLI tool
-      - name: Upload CLI tool (sdlshader)
+      # --- Package Library (with headers) ---
+      - name: Package Library
+        shell: bash
+        run: |
+          mkdir -p lib_artifacts/include
+          cp -r include/* lib_artifacts/include/
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp build/${{ matrix.build_type }}/SDL_shader.lib lib_artifacts/ || cp build/SDL_shader.lib lib_artifacts/
+            7z a libSDL_shader-${{ matrix.os }}.zip lib_artifacts
+          else
+            cp build/libSDL_shader.a lib_artifacts/
+            tar -czf libSDL_shader-${{ matrix.os }}.tar.gz lib_artifacts
+          fi
+
+      # --- Upload artifacts ---
+      - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
           name: sdlshader-${{ matrix.os }}
-          path: |
-            ${{ steps.vars.outputs.build_dir }}/Release/sdlshader*
-            ${{ steps.vars.outputs.build_dir }}/sdlshader*
+          path: sdlshader-${{ matrix.os }}.*
 
-      # 7️⃣ Upload library package (with include/)
-      - name: Upload static library (libSDL_shader.zip)
+      - name: Upload Library artifact
         uses: actions/upload-artifact@v4
         with:
           name: libSDL_shader-${{ matrix.os }}
-          path: libSDL_shader-${{ matrix.os }}.zip
+          path: libSDL_shader-${{ matrix.os }}.*
+
+  # --- Release job (only runs for tags) ---
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
