@@ -51,23 +51,23 @@ jobs:
             wayland-protocols \
             pkg-config
 
-      # --- Force MSVC environment on Windows ---
-      - name: Set up MSVC environment
-        if: matrix.os == 'windows-latest'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      # --- Adjust compiler flags for GCC ---
-      - name: Adjust GCC flags
-        if: matrix.os == 'ubuntu-latest'
-        run: echo "CXXFLAGS=-Wno-reorder -Wno-attributes" >> $GITHUB_ENV
-
       # --- Configure CMake ---
       - name: Configure CMake
         run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DSDL_SHADER_CLI=ON \
-            -DSDL_SHADER_LIBRARY=ON
+          # Disable GCC-only warnings on Windows
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cmake -S . -B build -G "Ninja" \
+              -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DSDL_SHADER_CLI=ON \
+              -DSDL_SHADER_LIBRARY=ON
+          else
+            cmake -S . -B build -G "Ninja" \
+              -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+              -DSDL_SHADER_CLI=ON \
+              -DSDL_SHADER_LIBRARY=ON \
+              -DCMAKE_C_FLAGS="-Wno-reorder-ctor -Wno-missing-exception-spec" \
+              -DCMAKE_CXX_FLAGS="-Wno-reorder-ctor -Wno-missing-exception-spec"
+          fi
 
       # --- Build ---
       - name: Build
