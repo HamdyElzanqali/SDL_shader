@@ -4,32 +4,42 @@ on:
   push:
     branches: [ "main" ]
     tags:
-      - 'v*'      # Trigger release when pushing tags like v1.0.0
+      - 'v*'    # Trigger on version tags like v1.0.0
   pull_request:
     branches: [ "main" ]
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        build_type: [Release]
+        include:
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
 
     steps:
-      # --- Checkout the repo and submodules ---
-      - name: Checkout repository
+      # --- Checkout source & submodules ---
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # --- Linux dependencies (Wayland, X11, Vulkan, etc.) ---
-      - name: Install build dependencies (Linux)
+      # --- Linux dependencies ---
+      - name: Install dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
+            ninja-build \
             libwayland-dev \
             libx11-dev \
             libxext-dev \
@@ -46,60 +56,53 @@ jobs:
             libgles2-mesa-dev \
             libvulkan-dev \
             wayland-protocols \
-            pkg-config \
-            ninja-build
+            pkg-config
 
-      # --- Configure (Linux) ---
-      - name: Configure with CMake (Linux)
-        if: matrix.os != 'windows-latest'
+      # --- Configure CMake ---
+      - name: Configure
         shell: bash
         run: |
           cmake -S . -B build -G "Ninja" \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DSDL_SHADER_CLI=ON \
             -DSDL_SHADER_LIBRARY=ON
 
-      # --- Configure (Windows) ---
-      - name: Configure with CMake (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: cmd
-        run: >
-          cmake -S . -B build -G "Ninja"
-          -DCMAKE_BUILD_TYPE=Release
-          -DSDL_SHADER_CLI=ON
-          -DSDL_SHADER_LIBRARY=ON
-
-      # --- Build both targets ---
+      # --- Build ---
       - name: Build
-        run: cmake --build build --config Release --parallel
+        shell: bash
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
 
-      # --- Package CLI tool ---
+      # --- Package CLI ---
       - name: Package CLI
         shell: bash
         run: |
           mkdir -p cli_artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp build/Release/sdlshader.exe cli_artifacts/
-            zip -r sdlshader-${{ matrix.os }}.zip cli_artifacts
+            cp build/${{ matrix.build_type }}/sdlshader.exe cli_artifacts/ || cp build/sdlshader.exe cli_artifacts/
+            7z a sdlshader-${{ matrix.os }}.zip cli_artifacts
           else
             cp build/sdlshader cli_artifacts/
             tar -czf sdlshader-${{ matrix.os }}.tar.gz cli_artifacts
           fi
 
-      # --- Package Static Library ---
+      # --- Package Library (with headers) ---
       - name: Package Library
         shell: bash
         run: |
-          mkdir -p lib_artifacts
+          mkdir -p lib_artifacts/include
+          cp -r include/* lib_artifacts/include/
+
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp build/Release/SDL_shader.lib lib_artifacts/ || true
-            zip -r libSDL_shader-${{ matrix.os }}.zip lib_artifacts
+            cp build/${{ matrix.build_type }}/SDL_shader.lib lib_artifacts/ || cp build/SDL_shader.lib lib_artifacts/
+            7z a libSDL_shader-${{ matrix.os }}.zip lib_artifacts
           else
-            cp build/libSDL_shader.a lib_artifacts/ || true
+            cp build/libSDL_shader.a lib_artifacts/
             tar -czf libSDL_shader-${{ matrix.os }}.tar.gz lib_artifacts
           fi
 
-      # --- Upload artifacts to Actions (for PRs & testing) ---
+      # --- Upload artifacts (for PR testing) ---
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
@@ -112,6 +115,7 @@ jobs:
           name: libSDL_shader-${{ matrix.os }}
           path: libSDL_shader-${{ matrix.os }}.*
 
+  # --- Release Job (only on tags) ---
   release:
     name: Publish Release
     needs: build
@@ -119,7 +123,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
-      - name: Download artifacts from build jobs
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: release_artifacts
@@ -128,7 +132,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release_artifacts/**/*
-          draft: false
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
