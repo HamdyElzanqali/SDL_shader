@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ]
     tags:
-      - 'v*'    # Build on version tags
+      - 'v*'      # Trigger release when pushing tags like v1.0.0
   pull_request:
     branches: [ "main" ]
 
@@ -17,12 +17,13 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     steps:
+      # --- Checkout the repo and submodules ---
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # ✅ Install SDL dependencies on Linux
+      # --- Linux dependencies (Wayland, X11, Vulkan, etc.) ---
       - name: Install build dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -48,13 +49,27 @@ jobs:
             pkg-config \
             ninja-build
 
-      - name: Configure with CMake
+      # --- Configure (Linux) ---
+      - name: Configure with CMake (Linux)
+        if: matrix.os != 'windows-latest'
+        shell: bash
         run: |
           cmake -S . -B build -G "Ninja" \
             -DCMAKE_BUILD_TYPE=Release \
             -DSDL_SHADER_CLI=ON \
             -DSDL_SHADER_LIBRARY=ON
 
+      # --- Configure (Windows) ---
+      - name: Configure with CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: >
+          cmake -S . -B build -G "Ninja"
+          -DCMAKE_BUILD_TYPE=Release
+          -DSDL_SHADER_CLI=ON
+          -DSDL_SHADER_LIBRARY=ON
+
+      # --- Build both targets ---
       - name: Build
         run: cmake --build build --config Release --parallel
 
@@ -84,7 +99,7 @@ jobs:
             tar -czf libSDL_shader-${{ matrix.os }}.tar.gz lib_artifacts
           fi
 
-      # --- Upload artifacts (for PRs / manual download) ---
+      # --- Upload artifacts to Actions (for PRs & testing) ---
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
@@ -104,7 +119,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
-      - name: Download artifacts
+      - name: Download artifacts from build jobs
         uses: actions/download-artifact@v4
         with:
           path: release_artifacts
@@ -112,7 +127,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release_artifacts/**/* 
+          files: release_artifacts/**/*
           draft: false
           prerelease: false
         env:
